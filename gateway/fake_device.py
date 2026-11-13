@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import threading
 
-from cryptography.hazmat.primitives import hashes, serialization #type: ignore
-from cryptography.hazmat.primitives.asymmetric import ec, utils #type: ignore
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, utils
 
 import challenge
 
 
 class FakeDevice:
+
     def __init__(
         self,
         device_id: bytes,
@@ -17,6 +18,7 @@ class FakeDevice:
         auto_approve: bool | None = True,
         start_counter: int = 0,
         verbose: bool = True,
+        private_key: ec.EllipticCurvePrivateKey | None = None,
     ) -> None:
         if len(device_id) != challenge.DEVICE_ID_LEN:
             raise ValueError(
@@ -25,17 +27,13 @@ class FakeDevice:
 
         self.device_id = bytes(device_id)
         self.label = label
-
-        #: True = always approve, False = always reject, None = never answer.
-        #: None exists so you can test the timeout path, which must deny.
         self.auto_approve = auto_approve
         self.verbose = verbose
 
-        self._key = ec.generate_private_key(ec.SECP256R1())
+        self._key = private_key or ec.generate_private_key(ec.SECP256R1())
         self._counter = start_counter
         self._lock = threading.Lock()
 
-    # -- enrollment ------------------------------------------------------
 
     def public_key_bytes(self) -> bytes:
         """Raw uncompressed point, matching what the SE051 returns."""
@@ -44,7 +42,18 @@ class FakeDevice:
             serialization.PublicFormat.UncompressedPoint,
         )
 
-    # -- the approval flow ------------------------------------------------
+    def private_key_pem(self) -> bytes:
+        return self._key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+
+    @classmethod
+    def from_pem(cls, pem: bytes, device_id: bytes, **kwargs) -> "FakeDevice":
+        key = serialization.load_pem_private_key(pem, password=None)
+        return cls(device_id, private_key=key, **kwargs)
+
 
     def handle_request(
         self,
@@ -54,13 +63,6 @@ class FakeDevice:
         nonce: bytes,
         session_id: bytes,
     ) -> dict | None:
-        """Render, decide, sign. None means no answer, which must deny.
-
-        Note that it hashes action_bytes itself rather than trusting the
-        action_hash it was handed. That is the what-you-see-is-what-you-sign
-        property: the device signs a hash of the bytes it actually rendered,
-        never one the server supplied alongside a different display string.
-        """
         rendered = action_bytes.decode("utf-8", errors="replace")
 
         if self.verbose:

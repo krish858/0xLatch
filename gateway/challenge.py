@@ -23,8 +23,6 @@ __all__ = [
     "verify",
 ]
 
-# Schema constants. Changing any of these is a breaking change: bump the
-# version string, and update the C side in the same commit.
 
 SCHEMA_VERSION = "v1"
 DOMAIN = b"latch/approval/v1"
@@ -47,13 +45,11 @@ PREIMAGE_LEN = (
     + COUNTER_LEN
 )
 
-# Fail loudly at import time rather than silently producing wrong bytes.
 assert len(DOMAIN) == DOMAIN_LEN, f"DOMAIN is {len(DOMAIN)} bytes, expected {DOMAIN_LEN}"
 assert PREIMAGE_LEN == 118, f"preimage is {PREIMAGE_LEN} bytes, expected 118"
 
 COUNTER_MAX = (1 << (COUNTER_LEN * 8)) - 1
 
-# P-256 uncompressed point: 0x04 || X (32) || Y (32)
 RAW_POINT_LEN = 65
 RAW_POINT_PREFIX = 0x04
 
@@ -63,7 +59,6 @@ class Decision(IntEnum):
     APPROVE = 0x01
 
 
-# Field validation
 
 
 def _fixed(name: str, value: bytes, expected: int) -> bytes:
@@ -73,8 +68,6 @@ def _fixed(name: str, value: bytes, expected: int) -> bytes:
         raise ValueError(f"{name} must be exactly {expected} bytes, got {len(value)}")
     return bytes(value)
 
-
-# Building blocks
 
 
 def new_nonce() -> bytes:
@@ -151,7 +144,6 @@ def challenge(
     decision: Decision,
     counter: int,
 ) -> bytes:
-    """The 32 bytes the SE051 actually signs."""
     return hashlib.sha256(
         build_preimage(
             device_id=device_id,
@@ -164,17 +156,8 @@ def challenge(
     ).digest()
 
 
-# Verification
-
 
 def load_public_key(key_bytes: bytes) -> ec.EllipticCurvePublicKey:
-    """Accept either format the SE051 hands back.
-
-    Depending on how the key object's type fields are populated,
-    sss_key_store_get_key returns either a raw uncompressed EC point
-    (65 bytes, 0x04 prefix) or a DER SubjectPublicKeyInfo. Both are the
-    same key.
-    """
     if not isinstance(key_bytes, (bytes, bytearray)):
         raise TypeError("key_bytes must be bytes")
     key_bytes = bytes(key_bytes)
@@ -197,17 +180,6 @@ def verify(
     signature: bytes,
     challenge_digest: bytes,
 ) -> bool:
-    """True if the signature is valid over this challenge.
-
-    Returns a bool rather than raising, because on the gateway a bad
-    signature is an expected outcome to be logged and denied, not an
-    exception to be caught. Signatures are DER-encoded ECDSA and vary in
-    length — never assume a fixed size.
-
-    Malformed signature bytes return False rather than raising: this is
-    data arriving from a network, and a crash on bad input is a denial of
-    service vector.
-    """
     if not isinstance(signature, (bytes, bytearray)):
         return False
 
